@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+
+  ApiGateway:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      AccessLogSetting: 
+        DestinationArn: 
+        Format: #Test - cloudtrail_logs-kms-encrypted
+      StageName: Prod
+      Description: Prod Stage
+      RestApiId: !Ref MyRestApi
+      DeploymentId: !Ref TestDeployment
+      DocumentationVersion: !Ref MyDocumentationVersion
+      ClientCertificateId: !Ref ClientCertificate
+      Variables:
+        Stack: Prod
+      MethodSettings:
+        - ResourcePath: /
+          HttpMethod: GET
+          MetricsEnabled: 'true'
+          DataTraceEnabled: 'false'
+        - ResourcePath: /stack
+          HttpMethod: POST
+          MetricsEnabled: 'true'
+          DataTraceEnabled: 'false'
+          ThrottlingBurstLimit: '999'
+        - ResourcePath: /stack
+          HttpMethod: GET
+          MetricsEnabled: 'true'
+          DataTraceEnabled: 'false'
+          ThrottlingBurstLimit: '555'
+
+  ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: myASG
+      MinSize: "1"
+      MaxSize: "6"
+      DesiredCapacity: "2"
+      HealthCheckType: EC2 #Test - auto-scaling-group_elb-health-check
+      HealthCheckGracePeriod: 300
+      LaunchTemplate:
+        LaunchTemplateId: !Ref myLaunchTemplate
+        Version: !GetAtt myLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref myPublicSubnet1
+        - !Ref myPublicSubnet2
+      MetricsCollection: 
+        - Granularity: "1Minute"
+          Metrics: 
+            - "GroupMinSize"
+            - "GroupMaxSize"
+      TargetGroupARNs:
+        - "TargetGroupARNs" #Test - auto-scaling-group_elb-health-check
+      LoadBalancerNames:
+        - "TargetGroupARNs" #Test - auto-scaling-group_elb-health-check
+      Tags:
+        - Key: Environment
+          Value: Production
+          PropagateAtLaunch: "true"
+        - Key: Purpose
+          Value: WebServerGroup
+          PropagateAtLaunch: "false"
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: #Test - cloudfront_default-root-object-configured
+        CacheBehaviors:
+          - LambdaFunctionAssociations:
+              - EventType: string-value
+                LambdaFunctionARN: string-value
+            ViewerProtocolPolicy: #Test - cloudfront_viewer-policy-https
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+            - EventType: string-value
+              LambdaFunctionARN: string-value
+          ViewerProtocolPolicy: #Test - cloudfront_viewer-policy-https
+        IPV6Enabled: boolean-value
+        Origins:
+          - CustomOriginConfig:
+              OriginKeepaliveTimeout: integer-value
+              OriginReadTimeout: integer-value
+          - S3OriginConfig:
+              OriginAccessIdentity: #Test - cloudfront_origin-access-identity-enabled
+        OriginGroups:
+          Items: #Test - cloudfront_origin-failover-enabled
+            - FailoverCriteria: 
+                OriginGroupFailoverCriteria
+              Id: String
+              Members: 
+                OriginGroupMembers
+          Quantity: 1
+      Tags:
+        - Key: string-value
+          Value: string-value
+
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      EnableLogFileValidation: false #Test - cloudtrail_log-file-validation
+      IsMultiRegionTrail: false #Test - cloudtrail_multi-region
+      CloudWatchLogsLogGroupArn: #Test - cloudtrail_cloudwatch-logging
+      CloudWatchLogsRoleArn: #Test - cloudtrail_cloudwatch-logging
+      KMSKeyId: #Test - cloudtrail_logs-kms-encrypted
+
+  IAMUser:
+    Type: AWS::IAM::User
+    Properties: 
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/ReadOnlyAccess #Test - iam-user_policy-attached
+      Policies: 
+        - PolicyName: example-policy #Test - iam-user_policy-attached
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow #Test - iam-policy_admin-privileges
+                Action:
+                  - '*'
+                Resource: '*' 
+      UserName: example
+
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: An example symmetric CMK
+      EnableKeyRotation: false #Test - kms_cmk-key-rotation
+      PendingWindowInDays: 20
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-default-1
+        Statement:
+        - Sid: Enable IAM User Permissions
+          Effect: Allow
+          Principal:
+            AWS: arn:aws:iam::111122223333:root
+          Action: kms:*
+          Resource: '*'
+        - Sid: Allow administration of the key
+          Effect: Allow
+          Principal:
+            AWS: arn:aws:iam::111122223333:user/Alice
+          Action:
+          - kms:Create*
+          - kms:Describe*
+          - kms:Enable*
+          - kms:List*
+          - kms:Put*
+          - kms:Update*
+          - kms:Revoke*
+          - kms:Disable*
+          - kms:Get*
+          - kms:Delete*
+          - kms:ScheduleKeyDeletion
+          - kms:CancelKeyDeletion
+          Resource: '*'
+        - Sid: Allow use of the key
+          Effect: Allow
+          Principal:
+            AWS: arn:aws:iam::111122223333:user/Bob
+          Action:
+          - kms:DescribeKey
+          - kms:Encrypt
+          - kms:Decrypt
+          - kms:ReEncrypt*
+          - kms:GenerateDataKey
+          - kms:GenerateDataKeyWithoutPlaintext
+          Resource: '*'
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Allow ssh to anywhere
+        VpcId:
+          Ref: myVPC
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
